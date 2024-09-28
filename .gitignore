@@ -1,0 +1,5 @@
+.venv/
+resources/Ohio2018_processed/train
+resources/Ohio2018_processed/test
+resources/Ohio2020_processed/train
+resources/Ohio2020_processed/test
