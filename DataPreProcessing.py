@@ -20,17 +20,8 @@ class PreProcessor:
         np.random.seed(randSeed)
         self.train_dict = self.loadData(train_path)
         self.test_dict = self.loadData(test_path)
-        raw_data_nan_window_Lengths = self.checkForNanWindows(self.train_dict, 'cbg', plot=False)  
-        # plt.plot(self.train_dict[1]['minutes_elapsed'], self.train_dict[1]['cbg'])   # THis is the 738 samples missing, just checking if it was not a logic error.
-        # plt.show()
-
-        self.thresholdCBG()
-        #self.window_lengths = self.checkForNanWindows(self.train_dict, 'thresholded', plot=False)
-
-        self.randomMasking(am_masks=15, window_lengths=raw_data_nan_window_Lengths)
-        self.window_lengths = self.checkForNanWindows(self.train_dict, 'threshAndMasked', plot=False)
-
-        self.snippets = self.getImputationSnippets(self.train_dict, 'threshAndMasked')
+        self.processData(am_masks=15)
+        self.nan_windows = self.getNanSegments(self.train_dict, 'threshAndMasked')
 
     def loadData(self, path:str) -> dict:
         """Load data as dataframe and return dict with each patient"""
@@ -45,8 +36,11 @@ class PreProcessor:
         
         return patient_dict
 
-    def getProcessedData(self, am_masks:int):
-        pass
+    def processData(self, am_masks:int) -> None:
+        """This function perofrms the thresholding and masking in sequence."""
+        self.thresholdCBG(quantile=0.8)
+        raw_data_nan_segments = self.getNanSegments(self.train_dict, 'cbg')
+        self.randomMasking(am_masks=am_masks, nan_segment_dict=raw_data_nan_segments)
 
     def thresholdCBG(self, quantile:float = 0.8) -> None:
         """Creates new data column 'thresholded' from 'cbg' where values are below 'quantile' else np.nan"""
@@ -57,15 +51,19 @@ class PreProcessor:
                 self.train_dict[index]['cbg'] <= patient_quantile_val, np.nan
                 )
     
-    def randomMasking(self, am_masks:int, window_lengths:np.ndarray) -> None:
+    def randomMasking(self, am_masks:int, nan_segment_dict:dict[dict[np.ndarray]]) -> None:
         """
         Creates new data column 'threshAndMasked' from 'thresholded' where am_masks random windows are masked to np.nan
         The length of each mask window is chosen randomly from window_lengths.
         """
+        all_window_lengths = []
+        for i in range(len(nan_segment_dict)):
+            all_window_lengths.extend(nan_segment_dict[i]["window_lengths"])
+        
         for index in self.train_dict:
             self.train_dict[index]['threshAndMasked'] = self.train_dict[index]['thresholded']
             np.random.seed(index)
-            rand_window_lengths = np.random.choice(window_lengths, size=am_masks, replace = False)
+            rand_window_lengths = np.random.choice(all_window_lengths, size=am_masks, replace = False) # TODO: Move this out of the loop so we do not have to set a seed each time.
 
             for i, length in enumerate(rand_window_lengths):
                 np.random.seed(i)
@@ -73,19 +71,17 @@ class PreProcessor:
                 rand_cbg_index = np.random.randint(0, max_index)
                 self.train_dict[index].loc[rand_cbg_index:rand_cbg_index+length, 'threshAndMasked'] = np.nan
 
-    def checkForNanWindows(self, dict:dict, col:str, plot:bool = True) -> np.ndarray:
+    def printInfoOnNanSegments(self, dict:dict, col:str, plot:bool = True) -> np.ndarray:
         """Get insights into the missing data windows in training data.
         Returns an array with lengths of all nan sequences found."""
 
-        nan_windows = []
-        for index in dict.keys():
-            nan_indices = np.asarray(self.train_dict[index][col][self.train_dict[index][col].isna()].index) # Get indices for nan entries in cbg
-            deriv = np.diff(nan_indices) # Derivative to highlight jumps in indices
-            window_indices = np.argwhere(deriv!=1).ravel() # Where deriv = 1 are consecutive nan's, we want the jumps to find windows
-            nan_windows.append(np.diff(window_indices)) # Derivative gives the length of the window (in samples) by difference of indices
+        nan_windows = self.getNanSegments(dict, col)
+        all_lengths = []
+        for i in range(len(nan_windows)):
+            all_lengths.extend(nan_windows[i]["window_lengths"])
 
-        window_lengths = np.concatenate([np.array(window) for window in nan_windows])
-        df = pd.DataFrame(window_lengths, columns=[col])
+        all_lengths = np.asarray(all_lengths)
+        df = pd.DataFrame(all_lengths, columns=[col])
  
         print('+'*8, 'INFO ON NAN WINDOWS', '+'*8)
         print(df[col].describe())
@@ -94,27 +90,34 @@ class PreProcessor:
         # plt.show()
 
         if plot:
-            # Just as an example on what is being done
             patient = 3
-            train_nan = np.asarray(self.train_dict[patient]['cbg'][self.train_dict[patient]['cbg'].isna()].index)
-            deriv = np.diff(train_nan)
-            indices = np.argwhere(deriv!=1).ravel()
+            nan_indices =  np.asarray(self.train_dict[patient]['cbg'][self.train_dict[patient]['cbg'].isna()].index) # Get indices for nan entries in cbg
+
+            deriv = np.diff(nan_indices)
+            end_indices = nan_indices[np.where(deriv != 1)[0]]
+            end_indices = np.append(end_indices, nan_indices[-1])
+
+            start_indices = nan_indices[np.where(deriv != 1)[0]+1]
+            start_indices = np.insert(start_indices, 0, nan_indices[0])
+            # Just as an example on what is being done
+            
             plt.subplot(2,1,1)
-            plt.plot(train_nan)
+            plt.plot(nan_indices)
             plt.title(f"NaN cbg indices on patient {patient}")
             plt.subplot(2,1,2)
             plt.plot(deriv)  
-            plt.title("NaN cbg indices diff")          
-            plt.scatter(indices, np.zeros(len(indices)), color='red')
+            plt.title("NaN cbg indices diff (scaling is off)")          
+            plt.scatter(start_indices, np.zeros(len(start_indices)), color='green')
+            plt.scatter(end_indices, np.zeros(len(end_indices)), color='red')
             plt.show()
 
-        return window_lengths
+        return all_lengths
 
-    def getImputationSnippets(self, dict:dict, col:str, plot:bool = True) -> dict:
-        """tbd"""
-
-        nan_windows = []
-        snippets = {}
+    def getNanSegments(self, dict:dict, col:str) -> dict[dict[np.ndarray]]:
+        """Returns a dictionary of dicts where each data series / patient is indexed individually.
+        For each index there is a field 'start_indices', 'end_indices' and 'window_lengths'."""
+        
+        segments = {}
         for index in dict.keys():
             
             nan_indices = np.asarray(self.train_dict[index][col][self.train_dict[index][col].isna()].index) # Get indices for nan entries in cbg
@@ -127,9 +130,10 @@ class PreProcessor:
             start_indices = np.insert(start_indices, 0, nan_indices[0])
 
             lengths = (end_indices-start_indices)+1
-            snippets[index] = np.asarray([start_indices, lengths])
+            segments[index] = {"start_indices": start_indices, "end_indices": end_indices, "window_lengths": lengths}
+            # snippets[index] = np.asarray([start_indices, lengths])
 
-        return snippets
+        return segments
            
 
 if __name__ == '__main__':
@@ -141,12 +145,17 @@ if __name__ == '__main__':
     
     n = 6000
     nan_indicator = np.full(len(preProc.train_dict[0]['threshAndMasked']), np.nan)
-    for key, value in preProc.snippets.items():
-        indices = value[0]
-        lengths = value[1]
-        for i, __ in enumerate(indices):
-            nan_indicator[indices[i]:indices[i]+lengths[i]] = 50
-        break # Only for the first one to check
+
+    # VIsualizing correct extraction of nan windows
+    patient_0_nan_indices = preProc.nan_windows[0]["start_indices"]
+    patient_0_nan_lengths = preProc.nan_windows[0]["window_lengths"]
+
+    sum_windows = 0
+    for i in range(len(preProc.nan_windows)):
+        sum_windows += len(preProc.nan_windows[i]["window_lengths"])
+
+    for k, index in enumerate(patient_0_nan_indices):
+        nan_indicator[index:index+patient_0_nan_lengths[k]] = 50
 
     low, high = 0,300
     plt.figure()
