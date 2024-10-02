@@ -40,8 +40,12 @@ class PreProcessor:
 
         self._process_data(thresh_quantile=trhesh_quantile, am_masks=am_masks)
 
+        self._raw_data_segments:dict[dict[np.ndarray]] = self._extract_non_nan_segments(self._train_dict, 'cbg')
         self._raw_data_nan_segments:dict[dict[np.ndarray]] = self._extract_nan_segments(self._train_dict, 'cbg')
+
         self._all_nan_segments:dict[dict[np.ndarray]] = self._extract_nan_segments(self._train_dict, 'threshAndMasked')
+
+        self._print_info_non_nan_segments(self._train_dict, 'cbg')
 
     def _load_data(self, path:str) -> dict:
         """Load data as dataframe and return dict with each patient"""
@@ -133,6 +137,21 @@ class PreProcessor:
 
         return all_lengths
 
+    def _print_info_non_nan_segments(self, dict:dict, col:str, plot:bool = True) -> np.ndarray:
+        """Get insights into the missing data windows in training data.
+        Returns an array with lengths of all nan sequences found."""
+
+        nan_windows = self._extract_non_nan_segments(dict, col)
+        all_lengths = []
+        for i in range(len(nan_windows)):
+            all_lengths.extend(nan_windows[i]["window_lengths"])
+
+        all_lengths = np.asarray(all_lengths)
+        df = pd.DataFrame(all_lengths, columns=[col])
+ 
+        print('+'*8, 'INFO ON NON NAN WINDOWS', '+'*8)
+        print(df[col].describe())
+
     def _extract_nan_segments(self, dict:dict, col:str) -> dict[dict[np.ndarray]]:
         """Returns a dictionary of dicts where each data series / patient is indexed individually.
         For each index there is a field 'start_indices', 'end_indices' and 'window_lengths'."""
@@ -155,24 +174,44 @@ class PreProcessor:
 
         return segments
 
+    def _extract_non_nan_segments(self, dict:dict, col:str) -> dict[dict[np.ndarray]]:
+        """Returns a dictionary of dicts where each data series / patient is indexed individually.
+        For each index there is a field 'start_indices', 'end_indices' and 'window_lengths'."""
+        
+        segments = {}
+        for index in dict.keys():
+            
+            non_nan_indices = np.asarray(self._train_dict[index][col][self._train_dict[index][col].notna()].index) # Get indices for nan entries in cbg
+            deriv = np.diff(non_nan_indices)
+            end_indices = non_nan_indices[np.where(deriv != 1)[0]]
+            end_indices = np.append(end_indices, non_nan_indices[-1])
+
+            start_indices = non_nan_indices[np.where(deriv != 1)[0]+1]
+            start_indices = np.insert(start_indices, 0, non_nan_indices[0])
+
+            lengths = (end_indices-start_indices)+1
+            segments[index] = {"start_indices": start_indices, "end_indices": end_indices, "window_lengths": lengths}
+
+        return segments
+
     def _remove_original_nan_segments(self) -> dict[dict[np.ndarray]]:
         """This function removes the nan segments we do actually not know. TODO: Is there a problem with overlapping segments?"""
         train_segments = {}
-        k = len(self._raw_data_nan_segments)
-        for i in range(k):
-            orig_start = self._raw_data_nan_segments[i]["start_indices"]
-            orig_end = self._raw_data_nan_segments[i]["end_indices"]
-            orig_lengths = self._raw_data_nan_segments[i]["window_lengths"]
+        # k = len(self._raw_data_nan_segments)
+        # for i in range(k):
+        #     orig_start = self._raw_data_nan_segments[i]["start_indices"]
+        #     orig_end = self._raw_data_nan_segments[i]["end_indices"]
+        #     orig_lengths = self._raw_data_nan_segments[i]["window_lengths"]
 
-            processed_start = self._all_nan_segments[i]["start_indices"]
-            processed_end = self._all_nan_segments[i]["end_indices"]
-            processed_lengths = self._all_nan_segments[i]["window_lengths"]
+        #     processed_start = self._all_nan_segments[i]["start_indices"]
+        #     processed_end = self._all_nan_segments[i]["end_indices"]
+        #     processed_lengths = self._all_nan_segments[i]["window_lengths"]
 
-            clean_start_indices = processed_start[~np.isin(processed_start, orig_start)]
-            clean_end_indices = processed_end[~np.isin(processed_end, orig_end)]
-            # Problem with lengths because they occur more than once!
-            clean_lengths = processed_lengths[~np.isin(processed_start, orig_start)]
-            train_segments[i] = {"start_indices": }
+        #     clean_start_indices = processed_start[~np.isin(processed_start, orig_start)]
+        #     clean_end_indices = processed_end[~np.isin(processed_end, orig_end)]
+        #     # Problem with lengths because they occur more than once!
+        #     clean_lengths = processed_lengths[~np.isin(processed_start, orig_start)]
+        #     train_segments[i] = {"start_indices": }
 
     def get_train_nan_segments(self) -> dict[dict[np.ndarray]]:
         """
@@ -190,6 +229,9 @@ class PreProcessor:
         """
         return self._all_nan_segments
     
+    def get_train_non_nan_segments(self) -> dict[dict[np.ndarray]]:
+        return self._raw_data_segments
+
     def get_train_dict(self) -> dict:
         """Get the dict of training data."""
         return self._train_dict
@@ -209,20 +251,41 @@ if __name__ == '__main__':
     n = 6000
     
     nan_indicator = np.full(len(train_dict[0]['threshAndMasked']), np.nan)
+    data_indicator = np.full(len(train_dict[0]['cbg']), np.nan)
+    orig_nan_indicator = np.full(len(train_dict[0]['cbg']), np.nan)
 
     # VIsualizing correct extraction of nan windows
     nan_segments = preProc.get_train_nan_segments()
+
+    # For the original data
+    orig_nan = preProc._raw_data_nan_segments
+    orig_data = preProc.get_train_non_nan_segments()
+
     patient_0_nan_indices = nan_segments[0]["start_indices"]
     patient_0_nan_lengths = nan_segments[0]["window_lengths"]
 
+    patient_0_indices = orig_data[0]["start_indices"]
+    patient_0_lengths = orig_data[0]["window_lengths"]
+
+    patient_0_orig_indices = orig_nan[0]["start_indices"]
+    patient_0_orig_lengths = orig_nan[0]["window_lengths"]
+
     for k, index in enumerate(patient_0_nan_indices):
         nan_indicator[index:index+patient_0_nan_lengths[k]] = 50
+
+    for k, index in enumerate(patient_0_indices):
+        data_indicator[index:index+patient_0_lengths[k]] = 50
+
+    for k, index in enumerate(patient_0_orig_indices):
+        orig_nan_indicator[index:index+patient_0_orig_lengths[k]] = 50
 
     low, high = 0,300
     plt.figure()
     
     plt.subplot(3,1,1)    
     plt.plot(train_dict[0]['minutes_elapsed'][0:n], train_dict[0]['cbg'][0:n])
+    plt.scatter(train_dict[0]['minutes_elapsed'][0:n], orig_nan_indicator[0:n], color='red', marker='x')
+    plt.scatter(train_dict[0]['minutes_elapsed'][0:n], data_indicator[0:n], color='green', marker='x')
     plt.ylim([low,high])
     plt.title("Raw Data")
     plt.grid('on')
