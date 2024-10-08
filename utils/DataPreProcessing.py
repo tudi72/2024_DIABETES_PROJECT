@@ -43,7 +43,7 @@ class PreProcessor:
         self._raw_data_segments:dict[dict[np.ndarray]] = self._extract_non_nan_segments(self._train_dict, 'cbg')
         self._raw_data_nan_segments:dict[dict[np.ndarray]] = self._extract_nan_segments(self._train_dict, 'cbg')
 
-        self._all_nan_segments:dict[dict[np.ndarray]] = self._extract_nan_segments(self._train_dict, 'threshAndMasked')
+        self._all_nan_segments:dict[dict[np.ndarray]] = self._extract_nan_segments(self._train_dict, 'cbg_80th_mask')
 
         self._print_info_non_nan_segments(self._train_dict, 'cbg')
 
@@ -77,7 +77,7 @@ class PreProcessor:
     
     def _random_masking(self, am_masks:int, nan_segment_dict:dict[dict[np.ndarray]]) -> None:
         """
-        Creates new data column 'threshAndMasked' from 'cbg_80th' where am_masks random windows are masked to np.nan
+        Creates new data column 'cbg_80th_mask' from 'cbg_80th' where am_masks random windows are masked to np.nan
         The length of each mask window is chosen randomly from window_lengths.
         """
         all_window_lengths = []
@@ -85,7 +85,7 @@ class PreProcessor:
             all_window_lengths.extend(nan_segment_dict[i]["window_lengths"])
         
         for index in self._train_dict:
-            self._train_dict[index]['threshAndMasked'] = self._train_dict[index]['cbg_80th']
+            self._train_dict[index]['cbg_80th_mask'] = self._train_dict[index]['cbg_80th']
             np.random.seed(index)
             rand_window_lengths = np.random.choice(all_window_lengths, size=am_masks, replace = False) # TODO: Move this out of the loop so we do not have to set a seed each time.
 
@@ -93,7 +93,7 @@ class PreProcessor:
                 np.random.seed(i)
                 max_index = len(self._train_dict[index]['cbg_80th'])-(length+1)
                 rand_cbg_index = np.random.randint(0, max_index)
-                self._train_dict[index].loc[rand_cbg_index:rand_cbg_index+length, 'threshAndMasked'] = np.nan
+                self._train_dict[index].loc[rand_cbg_index:rand_cbg_index+length, 'cbg_80th_mask'] = np.nan
 
     def _print_info_nan_segments(self, dict:dict, col:str, plot:bool = True) -> np.ndarray:
         """Get insights into the missing data windows in training data.
@@ -250,7 +250,7 @@ if __name__ == '__main__':
     
     n = 6000
     
-    nan_indicator = np.full(len(train_dict[0]['threshAndMasked']), np.nan)
+    nan_indicator = np.full(len(train_dict[0]['cbg_80th_mask']), np.nan)
     data_indicator = np.full(len(train_dict[0]['cbg']), np.nan)
     orig_nan_indicator = np.full(len(train_dict[0]['cbg']), np.nan)
 
@@ -297,7 +297,7 @@ if __name__ == '__main__':
     plt.grid('on')
 
     plt.subplot(3,1,3)
-    plt.plot(train_dict[0]['minutes_elapsed'][0:n], train_dict[0]['threshAndMasked'][0:n])
+    plt.plot(train_dict[0]['minutes_elapsed'][0:n], train_dict[0]['cbg_80th_mask'][0:n])
     plt.scatter(train_dict[0]['minutes_elapsed'][0:n], nan_indicator[0:n], color='red', marker='x')
     plt.ylim([low,high])
     plt.title("80th quantile removed and masked")  
