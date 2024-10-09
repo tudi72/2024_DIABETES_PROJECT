@@ -1,9 +1,10 @@
 from sklearn.linear_model import LinearRegression
 
 MODELS = {
-    'LR' : LinearRegression()
+    'LR' : LinearRegression(),
 }
 
 PARAM_GRIDS = {
-    'LR' : {}
+    'LR' : {},
+
 }

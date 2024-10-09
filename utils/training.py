@@ -1,5 +1,6 @@
 from sklearn.model_selection import GridSearchCV
 from sklearn.base import TransformerMixin,BaseEstimator
+from pypots.imputation import SAITS
 
 class ImputerTrainer(BaseEstimator,TransformerMixin):
     def __init__(self,models,param_grids,scoring_method = 'neg_mean_squared_error'):
@@ -41,8 +42,6 @@ class ImputerTrainer(BaseEstimator,TransformerMixin):
     def _info(self, msg:str) -> None:
         """Info print utility to know which class prints to terminal."""
         print("\033[36m[TrainerImputer]: ", msg, "\033[0m\n")
-
-
 
 
 
